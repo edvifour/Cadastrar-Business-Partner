@@ -1,0 +1,12 @@
+{
+  "name": "bp-backend-v4",
+  "version": "1.0.0",
+  "description": "Backend de cadastro de BP — V4 Company",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
