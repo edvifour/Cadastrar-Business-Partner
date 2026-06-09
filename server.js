@@ -26,13 +26,16 @@ async function getToken() {
     client_secret: CONFIG.clientSecret,
   }).toString();
 
-  const data = await httpRequest(CONFIG.tokenUrl, {
+  const res = await httpRequest(CONFIG.tokenUrl, {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   }, body);
 
-  const parsed = JSON.parse(data);
-  if (!parsed.access_token) throw new Error('Token não retornado: ' + data);
+  let parsed;
+  try { parsed = JSON.parse(res.body); }
+  catch { throw new Error('Resposta inesperada do tokenUrl: ' + res.body.slice(0, 200)); }
+
+  if (!parsed.access_token) throw new Error('Token não retornado: ' + res.body.slice(0, 200));
 
   tokenCache.token     = parsed.access_token;
   tokenCache.expiresAt = Date.now() + (parsed.expires_in || 3600) * 1000;
@@ -57,9 +60,12 @@ function httpRequest(targetUrl, options = {}, body = null) {
     }
 
     const req = lib.request(reqOpts, res => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve({ statusCode: res.statusCode, body: data, headers: res.headers }));
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        resolve({ statusCode: res.statusCode, body: raw, headers: res.headers });
+      });
     });
 
     req.on('error', reject);
@@ -78,11 +84,12 @@ function setCors(res) {
 // ─── BODY PARSER ────────────────────────────────────────────────────────────
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => body += chunk);
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
-      try { resolve(JSON.parse(body)); }
-      catch { reject(new Error('JSON inválido')); }
+      const raw = Buffer.concat(chunks).toString('utf8');
+      try { resolve(JSON.parse(raw)); }
+      catch { reject(new Error('JSON inválido no body da requisição')); }
     });
     req.on('error', reject);
   });
@@ -117,7 +124,6 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'cnpj_cpf é obrigatório' }));
         return;
       }
-
       if (!payload.full_name) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'full_name é obrigatório' }));
@@ -138,9 +144,16 @@ const server = http.createServer(async (req, res) => {
         },
       }, sapBody);
 
+      // Log completo da resposta SAP para debug
+      console.log('[SAP] HTTP', sapRes.statusCode, '| body:', sapRes.body.slice(0, 500));
+
+      // Tenta parse JSON — se falhar, devolve raw para o frontend
       let sapData;
-      try { sapData = JSON.parse(sapRes.body); }
-      catch { sapData = { raw: sapRes.body }; }
+      try {
+        sapData = JSON.parse(sapRes.body);
+      } catch {
+        sapData = { raw: sapRes.body, statusCode: sapRes.statusCode };
+      }
 
       res.writeHead(sapRes.statusCode, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(sapData));
