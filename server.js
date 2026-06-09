@@ -116,16 +116,16 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      console.log('[REQ] payload parseado — cnpj_cpf:', payload.cnpj_cpf, '| full_name:', payload.full_name);
+      console.log('[REQ] payload parseado — BP:', payload.OrganizationBPName1, '| doc:', payload.SearchTerm2);
 
-      if (!payload.cnpj_cpf) {
+      if (!payload.OrganizationBPName1) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'cnpj_cpf é obrigatório' }));
+        res.end(JSON.stringify({ error: 'OrganizationBPName1 é obrigatório' }));
         return;
       }
-      if (!payload.full_name) {
+      if (!payload.SearchTerm2) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'full_name é obrigatório' }));
+        res.end(JSON.stringify({ error: 'SearchTerm2 (CNPJ/CPF) é obrigatório' }));
         return;
       }
 
@@ -161,6 +161,54 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+
+
+  // ─── DIAGNÓSTICO TEMPORÁRIO ─────────────────────────────────
+  if (req.method === 'GET' && req.url === '/diag-urls') {
+    const BASE = 'sa-cf-br10-v4-btp-prd-zjbc9c6b';
+    const PATH = '/billing/sap/businesspartner';
+    const URLS = [
+      `https://${BASE}.it-cpi008-rt.cfapps.br10.hana.ondemand.com${PATH}`,
+      `https://${BASE}.it-cpi008.cfapps.br10.hana.ondemand.com${PATH}`,
+      `https://${BASE}.integrationsuite.cfapps.br10.hana.ondemand.com${PATH}`,
+      `https://${BASE}.integrationsuite.cfapps.br10.hana.ondemand.com/api${PATH}`,
+      `https://${BASE}.it-cpi006-rt.cfapps.br10.hana.ondemand.com${PATH}`,
+      `https://${BASE}.it-cpi010-rt.cfapps.br10.hana.ondemand.com${PATH}`,
+      `https://it-cpi008-rt.cfapps.br10.hana.ondemand.com${PATH}`,
+    ];
+
+    let token = null;
+    try { token = await getToken(); } catch(e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Falha ao obter token: ' + e.message }));
+      return;
+    }
+
+    const results = [];
+    for (const u of URLS) {
+      try {
+        const r = await httpRequest(u, {
+          method: 'OPTIONS',
+          headers: { 'Authorization': 'Bearer ' + token },
+        });
+        const cfError = r.headers['x-cf-routererror'] || '';
+        results.push({
+          url: u,
+          status: r.statusCode,
+          cf_error: cfError,
+          ok: r.statusCode !== 404 || !cfError,
+          body_preview: r.body.slice(0, 100),
+        });
+      } catch(e) {
+        results.push({ url: u, status: 0, error: e.message, ok: false });
+      }
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ results }, null, 2));
+    return;
+  }
+  // ─── FIM DIAGNÓSTICO ─────────────────────────────────────────
 
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Rota não encontrada' }));
