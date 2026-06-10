@@ -87,7 +87,7 @@ function readRawBody(req) {
 
 
 async function verificarBPExistente(doc, token) {
-  const queryUrl = CONFIG.apiUrl + '?$filter=SearchTerm2 eq '' + doc + ''&$format=json&$select=SearchTerm2,OrganizationBPName1';
+  const queryUrl = CONFIG.apiUrl + `?$filter=SearchTerm2 eq '${doc}'&$format=json&$select=SearchTerm2,OrganizationBPName1`;
   const res = await httpRequest(queryUrl, {
     method: 'GET',
     headers: {
