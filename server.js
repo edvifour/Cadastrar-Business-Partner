@@ -85,6 +85,40 @@ function readRawBody(req) {
   });
 }
 
+
+async function verificarBPExistente(doc, token) {
+  const queryUrl = CONFIG.apiUrl + '?$filter=SearchTerm2 eq '' + doc + ''&$format=json&$select=SearchTerm2,OrganizationBPName1';
+  const res = await httpRequest(queryUrl, {
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json',
+    },
+  });
+
+  console.log('[CHECK] HTTP', res.statusCode, '| doc:', doc);
+
+  if (res.statusCode !== 200) return null; // não bloqueia se a consulta falhar
+
+  let data;
+  try { data = JSON.parse(res.body); } catch { return null; }
+
+  // Navega na estrutura OData
+  const results = data?.d?.results || data?.results || [];
+  if (Array.isArray(results) && results.length > 0) {
+    return results[0]; // BP já existe
+  }
+
+  // Tenta estrutura feed
+  const entries = data?.feed?.entry;
+  if (entries) {
+    const arr = Array.isArray(entries) ? entries : [entries];
+    if (arr.length > 0) return arr[0];
+  }
+
+  return null; // não existe
+}
+
 const server = http.createServer(async (req, res) => {
   setCors(res);
 
@@ -130,6 +164,26 @@ const server = http.createServer(async (req, res) => {
       }
 
       const token   = await getToken();
+
+      // Verificar duplicidade antes de criar
+      const doc = payload.SearchTerm2;
+      const existente = await verificarBPExistente(doc, token);
+      if (existente) {
+        const nome = existente?.content?.properties?.OrganizationBPName1 ||
+                     existente?.OrganizationBPName1 || 'BP existente';
+        const bpNum = existente?.content?.properties?.BusinessPartner ||
+                      existente?.BusinessPartner || '';
+        console.log('[CHECK] duplicidade bloqueada — doc:', doc, '| BP:', bpNum);
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'BP já cadastrado no SAP',
+          message: `CNPJ/CPF ${doc} já está cadastrado (${nome}${bpNum ? ' — BP: ' + bpNum : ''})`,
+          bp_number: bpNum,
+          existing_name: nome,
+        }));
+        return;
+      }
+
       const sapBody = JSON.stringify(payload);
       console.log('[SAP] enviando payload:', sapBody.slice(0, 300));
 
